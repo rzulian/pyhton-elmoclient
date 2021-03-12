@@ -7,7 +7,7 @@ import queue
 from .elmoprocessor import *
 
 _LOGGER = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] (%(threadName)-10s) %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] (%(threadName)-10s) %(message)s")
 SIGTYPES =  ["ingresso", "uscita", "settore", "uscita_dedicata", "memoria_uscita_dedicata", "anomalia", "settore_inseribile"]
 
 class PollThread(threading.Thread):
@@ -116,6 +116,9 @@ class ConnectionThread(threading.Thread):
                 else:
                     # close all threads
                     self.elmo.poll_thread.join()
+                    self.elmo.connected = False
+                    _LOGGER.debug(
+                        f"closed connection to {self.elmo.host}:{self.elmo.port}")
 
         self.elmo.socket.close()
 
