@@ -38,7 +38,8 @@ class PollThread(threading.Thread):
                             self.elmo.restart_connection = True
                     else:
                         data = self.elmo.socket.recv(4096)
-                        print('Received: %r' % binascii.hexlify(data))
+                        _LOGGER.debug(
+                            f"RX:{command} <{str(binascii.hexlify(data), 'ascii')}>")
                         if (command=='lettura_inseribili'):
                             self.elmo.parse_settori_inseribili(data)
             
@@ -142,9 +143,7 @@ class ElmoClient:
         self.connected = False
         self.restart_lock = threading.Lock()
         self.restart_connection = False
-
-        self.connection_thread = ConnectionThread(self)
-        self.poll_thread = PollThread(self)
+        self.connection_thread = None
 
         self.tx_queue = queue.Queue()
 
@@ -162,10 +161,13 @@ class ElmoClient:
 
     def start(self):
         """Start the Elmo client instance."""
-        if self.connection_thread.is_alive():
+        if self.connection_thread and self.connection_thread.is_alive():
             _LOGGER.error("start() called while already running")
         else:
             _LOGGER.debug("connection thread start requested")
+            self.connection_thread = ConnectionThread(self)
+            self.poll_thread = PollThread(self)
+
             self.connection_thread.start()
             self.connected = True
 
