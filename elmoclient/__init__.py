@@ -4,11 +4,33 @@ import logging
 import time
 import threading
 import queue
-from .elmoprocessor import *
+from .elmoprocessor import (
+    cmd_inserisci_settore,
+    cmd_disinserisci_settore,
+    cmd_lettura_settori_inseribili,
+    cmd_lettura_stato_ingressi,
+    rq_cmd,
+    recive,
+    parse_to_send,
+    read_stato_allineamento_ridotto,
+    read_settori_inseribili,
+    read_stato_ingressi,
+)
 
 _LOGGER = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG, format="[%(levelname)s] (%(threadName)-10s) %(message)s")
-SIGTYPES =  ["ingresso", "uscita", "settore", "uscita_dedicata", "memoria_uscita_dedicata", "anomalia", "settore_inseribile"]
+logging.basicConfig(
+    level=logging.DEBUG, format="[%(levelname)s] (%(threadName)-10s) %(message)s"
+)
+SIGTYPES = [
+    "ingresso",
+    "uscita",
+    "settore",
+    "uscita_dedicata",
+    "memoria_uscita_dedicata",
+    "anomalia",
+    "settore_inseribile",
+]
+
 
 class PollThread(threading.Thread):
     """Process poll update requests."""
@@ -30,7 +52,8 @@ class PollThread(threading.Thread):
                 command, tx = self.elmo.tx_queue.get()
                 if self.elmo.restart_connection is False:
                     _LOGGER.debug(
-                        f"TX:{command} <{str(binascii.hexlify(tx), 'ascii')}>")
+                        f"TX:{command} <{str(binascii.hexlify(tx), 'ascii')}>"
+                    )
                     try:
                         self.elmo.socket.sendall(tx)
                     except socket.error:
@@ -39,22 +62,25 @@ class PollThread(threading.Thread):
                     else:
                         data = self.elmo.socket.recv(4096)
                         _LOGGER.debug(
-                            f"RX:{command} <{str(binascii.hexlify(data), 'ascii')}>")
-                        if (command=='lettura_inseribili'):
+                            f"RX:{command} <{str(binascii.hexlify(data), 'ascii')}>"
+                        )
+                        if command == "lettura_inseribili":
                             self.elmo.parse_settori_inseribili(data)
-            
+
             time.sleep(0.2)
             # request a status update
-            if (self.elmo.connected is True
+            if (
+                self.elmo.connected is True
                 and self.elmo.restart_connection is False
-                    and self.elmo.polling_enabled is True):
+                and self.elmo.polling_enabled is True
+            ):
                 try:
-                    self.elmo.socket.send(bytes.fromhex('02010800003f004803'))
+                    self.elmo.socket.send(bytes.fromhex("02010800003f004803"))
                 except socket.error:
                     with self.elmo.restart_lock:
                         self.elmo.restart_connection = True
-                data = self.elmo.socket.recv(4096)                  
-                self.elmo.parse_update(data) 
+                data = self.elmo.socket.recv(4096)
+                self.elmo.parse_update(data)
                 # print('Received: %r' % binascii.hexlify(data))
 
         _LOGGER.debug("polling thread stop")
@@ -83,8 +109,7 @@ class ConnectionThread(threading.Thread):
 
         while not self._stop_event.is_set():
             try:
-                self.elmo.socket = socket.socket(
-                    socket.AF_INET, socket.SOCK_STREAM)
+                self.elmo.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.elmo.socket.settimeout(self.elmo.timeout)
                 self.elmo.socket.connect((self.elmo.host, self.elmo.port))
             except socket.error:
@@ -112,13 +137,15 @@ class ConnectionThread(threading.Thread):
                     self.elmo.connected = False
                     self.elmo.socket.close()
                     _LOGGER.debug(
-                        f"lost connection to {self.elmo.host}:{self.elmo.port}")
+                        f"lost connection to {self.elmo.host}:{self.elmo.port}"
+                    )
                 else:
                     # close all threads
                     self.elmo.poll_thread.join()
                     self.elmo.connected = False
                     _LOGGER.debug(
-                        f"closed connection to {self.elmo.host}:{self.elmo.port}")
+                        f"closed connection to {self.elmo.host}:{self.elmo.port}"
+                    )
 
         self.elmo.socket.close()
 
@@ -132,7 +159,6 @@ class ConnectionThread(threading.Thread):
 
 
 class ElmoClient:
-
     def __init__(self, host, port=10001, timeout=2, num_ingressi=32, num_uscite=32):
         """ Initialize ElmoClient object """
         self.host = host
@@ -140,7 +166,7 @@ class ElmoClient:
         self.socket = None
         self.timeout = timeout
         self.polling_enabled = False
- 
+
         self._client = None
         self._prev_status = None
         self.connected = False
@@ -161,7 +187,6 @@ class ElmoClient:
             "settore_inseribile": {},
         }
 
-
     def start(self):
         """Start the Elmo client instance."""
         if self.connection_thread and self.connection_thread.is_alive():
@@ -170,7 +195,6 @@ class ElmoClient:
             _LOGGER.debug("connection thread start requested")
             self.connection_thread = ConnectionThread(self)
             self.poll_thread = PollThread(self)
-
             self.connection_thread.start()
             self.connected = True
 
@@ -186,29 +210,29 @@ class ElmoClient:
         cmd = cmd_inserisci_settore(num_settore)
         cmd = rq_cmd(cmd)
         cmd = parse_to_send(cmd)
-        self.tx_queue.put(('ins_settore', cmd))
+        self.tx_queue.put(("ins_settore", cmd))
 
     def disinserisci_settore(self, num_settore):
         cmd = cmd_disinserisci_settore(num_settore)
         cmd = rq_cmd(cmd)
         cmd = parse_to_send(cmd)
-        self.tx_queue.put(('disins_settore', cmd))
+        self.tx_queue.put(("disins_settore", cmd))
 
     def richiedi_lettura_settori_inseribili(self):
         cmd = cmd_lettura_settori_inseribili()
         cmd = rq_cmd(cmd)
         cmd = parse_to_send(cmd)
-        self.tx_queue.put(('lettura_inseribili', cmd))
+        self.tx_queue.put(("lettura_inseribili", cmd))
 
     def richiedi_lettura_stato_ingressi(self):
         cmd = cmd_lettura_stato_ingressi()
         cmd = rq_cmd(cmd)
         cmd = parse_to_send(cmd)
-        self.tx_queue.put(('lettura_ingressi', cmd))
+        self.tx_queue.put(("lettura_ingressi", cmd))
 
     def get(self, sigtype, pos):
         """Get the current value of a pos."""
-        if (sigtype not in SIGTYPES):
+        if sigtype not in SIGTYPES:
             raise ValueError(f"get(): '{sigtype}' is not a valid signal sigtype")
 
         with self.join_lock:
@@ -217,10 +241,10 @@ class ElmoClient:
             except KeyError:
                 value = 0
         return value
-    
+
     def subscribe(self, sigtype, pos, callback):
         """Subscribe to join change events by specifying callback functions."""
-        if (sigtype not in SIGTYPES):
+        if sigtype not in SIGTYPES:
             raise ValueError(f"subscribe(): '{sigtype}' is not a valid signal sigtype")
 
         with self.join_lock:
@@ -233,7 +257,7 @@ class ElmoClient:
     def update_signals(self, sigtype, data):
         for i in range(len(data)):
             try:
-                pos = i+1
+                pos = i + 1
                 value = int(data[i])
                 # updates the value only if changed
                 if self._status[sigtype][pos][0] != value:
@@ -246,23 +270,31 @@ class ElmoClient:
                     value,
                 ]
 
-    
     def parse_update(self, data):
         """ parse incoming status update only when different from the previous status """
-        if (data == self._prev_status ):    
-            return       
-                    
-        # print('to be parsed: %r' % binascii.hexlify(data)) 
+        if data == self._prev_status:
+            return
+
+        # print('to be parsed: %r' % binascii.hexlify(data))
         decode = recive(data)
         # print(f"TX: <{str(binascii.hexlify(decode), 'ascii')}>")
-        # riduco stringa scartando Lmsg + Flag +Ind(msb) + Ind(lsb) 
-        (self._ingressi, self._memoria_ingressi, self._uscite, self._settori, self._settori_max_sicurezza, self._anomalia, self._uscita_dedicata, self._memoria_uscita_dedicata) = read_stato_allineamento_ridotto(decode[4:])
-        self.update_signals('ingresso', self._ingressi)
-        self.update_signals('uscita', self._uscite)
-        self.update_signals('settore', self._settori)
-        self.update_signals('anomalia', self._anomalia)
-        self.update_signals('uscita_dedicata', self._uscita_dedicata)
-        self.update_signals('memoria_uscita_dedicata', self._memoria_uscita_dedicata)
+        # riduco stringa scartando Lmsg + Flag +Ind(msb) + Ind(lsb)
+        (
+            self._ingressi,
+            self._memoria_ingressi,
+            self._uscite,
+            self._settori,
+            self._settori_max_sicurezza,
+            self._anomalia,
+            self._uscita_dedicata,
+            self._memoria_uscita_dedicata,
+        ) = read_stato_allineamento_ridotto(decode[4:])
+        self.update_signals("ingresso", self._ingressi)
+        self.update_signals("uscita", self._uscite)
+        self.update_signals("settore", self._settori)
+        self.update_signals("anomalia", self._anomalia)
+        self.update_signals("uscita_dedicata", self._uscita_dedicata)
+        self.update_signals("memoria_uscita_dedicata", self._memoria_uscita_dedicata)
         self._prev_status = data
         # aggiorna lo stato degli inseribili visto che è cambiato qualcosa
         self.richiedi_lettura_settori_inseribili()
@@ -270,9 +302,9 @@ class ElmoClient:
     def parse_settori_inseribili(self, data):
         decode = recive(data)
         self._settori_inseribili = read_settori_inseribili(decode[4:])
-        self.update_signals('settore_inseribile', self._settori_inseribili)
+        self.update_signals("settore_inseribile", self._settori_inseribili)
 
     def parse_stato_ingressi(self, data):
         decode = recive(data)
         self._ingressi = read_stato_ingressi(decode[4:])
-        self.update_signals('ingresso', self._ingressi)
+        self.update_signals("ingresso", self._ingressi)
