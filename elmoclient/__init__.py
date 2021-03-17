@@ -5,7 +5,7 @@ import time
 import threading
 import queue
 from .elmoprocessor import (
-    cmd_inserisci_settore,
+    cmd_accesso_sistema, cmd_inserisci_settore,
     cmd_disinserisci_settore,
     cmd_lettura_settori_inseribili,
     cmd_lettura_stato_ingressi,
@@ -66,6 +66,8 @@ class PollThread(threading.Thread):
                         )
                         if command == "lettura_inseribili":
                             self.elmo.parse_settori_inseribili(data)
+                        elif command == "accesso_sistema":
+                            self.elmo.parse_accesso_sistema(data)
 
             time.sleep(0.2)
             # request a status update
@@ -159,10 +161,21 @@ class ConnectionThread(threading.Thread):
 
 
 class ElmoClient:
-    def __init__(self, host, port=10001, timeout=2, num_ingressi=32, num_uscite=32):
+    def __init__(
+        self,
+        host,
+        port=10001,
+        timeout=2,
+        num_ingressi=32,
+        num_uscite=32,
+        user="",
+        password="",
+    ):
         """ Initialize ElmoClient object """
         self.host = host
         self.port = port
+        self._user = user
+        self._password = password
         self.socket = None
         self.timeout = timeout
         self.polling_enabled = False
@@ -170,6 +183,8 @@ class ElmoClient:
         self._client = None
         self._prev_status = None
         self.connected = False
+        self.logged_in = False
+
         self.restart_lock = threading.Lock()
         self.restart_connection = False
         self.connection_thread = None
@@ -205,6 +220,12 @@ class ElmoClient:
         else:
             _LOGGER.debug("connection thread stop requested")
             self.connection_thread.join()
+
+    def accesso_sistema(self):
+        cmd = cmd_accesso_sistema(self._user, self._password)
+        cmd = rq_cmd(cmd)
+        cmd = parse_to_send(cmd)
+        self.tx_queue.put(("accesso_sistema", cmd))
 
     def inserisci_settore(self, num_settore):
         cmd = cmd_inserisci_settore(num_settore)
@@ -308,3 +329,12 @@ class ElmoClient:
         decode = recive(data)
         self._ingressi = read_stato_ingressi(decode[4:])
         self.update_signals("ingresso", self._ingressi)
+
+    def parse_accesso_sistema(self, data):
+        decode = recive(data)
+        response = decode[4]
+        if (response == 0x06):
+            self.logged_in = True
+        else:
+            self.logged_in = False
+            _LOGGER.debug("wrong authentication")

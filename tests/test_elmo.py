@@ -26,7 +26,8 @@ lettura_stato_ingressi = bytes.fromhex(
 lettura_stato_ingressi_porta_aperta = bytes.fromhex(
     "022228000110901090000020080000000000000000000000000001000000108200000000000000000000009603"
 )
-
+accesso_sistema_resp_ok = bytes.fromhex("020128000106003003")
+accesso_sistema_resp_ko = bytes.fromhex("020128000107003103")
 
 class TestPerformance(unittest.TestCase):
     def test_performance_allineamento_ridotto(self):
@@ -124,14 +125,13 @@ class TestPerformance(unittest.TestCase):
         self.assertEqual(elmo._status["ingresso"][19][0], 1)
         self.assertEqual(elmo._status["ingresso"][29][0], 1)
 
-    def test_encrypt_password(self):
+    def test_accesso_sistema(self):
         # questo controlla anche che la lettura sia ordinata
-        elmo = ElmoClient("192.168.1.4", user=20, password="561290")
-        elmo.accesso_sistema()
-
-        self.assertEqual(elmo._status["ingresso"][19][0], 1)
-        self.assertEqual(elmo._status["ingresso"][29][0], 1)
-
+        elmo = ElmoClient("192.168.1.4")
+        elmo.parse_accesso_sistema(accesso_sistema_resp_ok)
+        self.assertEqual(elmo.logged_in, True)
+        elmo.parse_accesso_sistema(accesso_sistema_resp_ko)
+        self.assertEqual(elmo.logged_in, False)
 
 if __name__ == "__main__":
     unittest.main()

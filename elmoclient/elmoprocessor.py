@@ -42,7 +42,7 @@ LEGGISTRINGHE = 0x3D  # "="  seguito da 3 byte organizzati come segue:
 # [ClasseElemento][NumeroElementoH][NumeroElementoL]
 # al quale la centrale risponde con una stringa (non terminata a 0).
 ALLINEAMENTORIDOTTO = 0x3F  # "?"
-ACCESSO_AL_SISTEMA = 0x41  # "?"
+ACCESSO_AL_SISTEMA = 0x41  # "A"
 LETTURAINSERIBILI = (
     0x5E  # "^"  consente di conoscere i settori inseribili in modo totale e parziale
 )
@@ -105,7 +105,7 @@ def rq_cmd(data: bytearray):
 
 
 def parse_to_send(to_send):
-
+    # FORMATO Lmsg + Flag +Ind(msb) + Ind(lsb) + Stringacmd
     comando = to_send[4]
     lmsg = to_send[0]
     if lmsg == len(to_send) - 4:
@@ -136,14 +136,34 @@ def recive(to_read):
     # in crestron restituisce il comando che è stato inviato
     # probabilmente perchè non c'è il multi treading
     # FORMATO Lmsg + Flag +Ind(msb) + Ind(lsb) + Stringacmd
-    # a questo punto dovrebbe data_length + 4 = len(to_read)
+    # a questo punto dovrebbe data_length = len(to_read) + 4
 
     return to_read
 
 
 def encrypt_password(password):
+    pwd = password.encode('utf-8')
+    pwd_len = len(password)
+    encrypted = bytearray()
 
-    return password
+    i = 0
+    while (i <= pwd_len - 1):       
+        if (pwd_len % 2 == 1) and i == pwd_len - 1:
+            lastByte = 0xF0 + (pwd[pwd_len - 1] & 0xF)
+            encrypted += lastByte.to_bytes(1, "big")
+        else:
+            nBCD = ((pwd[i] & 0xF) << 4) + (pwd[i + 1] & 0xF)
+            encrypted += nBCD.to_bytes(1, "big")
+        i = i + 2
+    return encrypted
+
+
+def cmd_accesso_sistema(user, password):
+    cmd = bytearray()
+    cmd += ACCESSO_AL_SISTEMA.to_bytes(1, "big")
+    cmd += user.to_bytes(2, "big")
+    cmd += encrypt_password(password)
+    return cmd
 
 
 def cmd_inserisci_settore(settore):
