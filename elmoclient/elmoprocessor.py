@@ -51,6 +51,9 @@ LEGGIORADATA = 0x7D  # "}"
 STATUSINFO = 0x7E  # "~"  consente di ottenere lo stato completo della centrale.
 CONTROLLOREMOTO = 0x2D
 
+CMD_SETTORI_INSERIBILI = b'\x02\x01\x08\x00\x00^\x00g\x03'
+CMD_ALLINEAMENTO_RIDOTTO = b'\x02\x01\x08\x00\x00?\x00H\x03'
+
 
 def byte_stuffing(to_convert):
     stuffed = bytearray()
