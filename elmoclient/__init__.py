@@ -41,6 +41,11 @@ class PollThread(threading.Thread):
         self.elmo = elmo
         threading.Thread.__init__(self, name="Send")
 
+    def _handle_socket_error(self):
+        """Handle socket errors by setting restart_connection flag."""
+        with self.elmo.restart_lock:
+            self.elmo.restart_connection = True
+
     def run(self):
         """Start the Elmo outgoing packet processing thread."""
         _LOGGER.debug("polling thread start")
@@ -57,17 +62,19 @@ class PollThread(threading.Thread):
                     try:
                         self.elmo.socket.sendall(tx)
                     except socket.error:
-                        with self.elmo.restart_lock:
-                            self.elmo.restart_connection = True
+                        self._handle_socket_error()
                     else:
-                        data = self.elmo.socket.recv(4096)
-                        _LOGGER.debug(
-                            f"RX:{command} <{str(binascii.hexlify(data), 'ascii')}>"
-                        )
-                        if command == "lettura_inseribili":
-                            self.elmo.parse_settori_inseribili(data)
-                        elif command == "accesso_sistema":
-                            self.elmo.parse_accesso_sistema(data)
+                        try:
+                            data = self.elmo.socket.recv(4096)
+                            _LOGGER.debug(
+                                f"RX:{command} <{str(binascii.hexlify(data), 'ascii')}>"
+                            )
+                            if command == "lettura_inseribili":
+                                self.elmo.parse_settori_inseribili(data)
+                            elif command == "accesso_sistema":
+                                self.elmo.parse_accesso_sistema(data)
+                        except socket.error:
+                            self._handle_socket_error()
 
             time.sleep(0.2)
             # request a status update
@@ -78,11 +85,13 @@ class PollThread(threading.Thread):
             ):
                 try:
                     self.elmo.socket.send(bytes.fromhex("02010800003f004803"))
+                    try:
+                        data = self.elmo.socket.recv(4096)
+                        self.elmo.parse_update(data)
+                    except socket.error:
+                        self._handle_socket_error()
                 except socket.error:
-                    with self.elmo.restart_lock:
-                        self.elmo.restart_connection = True
-                data = self.elmo.socket.recv(4096)
-                self.elmo.parse_update(data)
+                    self._handle_socket_error()
                 # print('Received: %r' % binascii.hexlify(data))
 
         _LOGGER.debug("polling thread stop")
@@ -90,7 +99,7 @@ class PollThread(threading.Thread):
     def join(self, timeout=None):
         """Stop the Elmo outgoing packet processing thread."""
         self._stop_event.set()
-        _LOGGER.debug("set() in polling")
+        _LOGGER.debug("stop event set() in polling")
         threading.Thread.join(self, timeout)
 
 
@@ -150,13 +159,13 @@ class ConnectionThread(threading.Thread):
                     )
 
         self.elmo.socket.close()
-
+        self.elmo.connected = False
         _LOGGER.debug("connection thread stop")
 
     def join(self, timeout=None):
         """Stop the socket management thread."""
         self._stop_event.set()
-        _LOGGER.debug("set() in connection")
+        _LOGGER.debug("stop event set() in connection")
         threading.Thread.join(self, timeout)
 
 
