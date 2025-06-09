@@ -10,7 +10,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name="python-elmoclient",
-    version="0.0.5",
+    version="0.0.7",
     license="MIT",
     description="Python library for Elmo control units",
     long_description=long_description,

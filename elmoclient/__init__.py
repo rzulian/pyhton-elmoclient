@@ -45,6 +45,7 @@ class PollThread(threading.Thread):
         """Handle socket errors by setting restart_connection flag."""
         with self.elmo.restart_lock:
             self.elmo.restart_connection = True
+            self.elmo.connected = False  # Mark as disconnected to prevent further operations
 
     def run(self):
         """Start the Elmo outgoing packet processing thread."""
@@ -142,8 +143,8 @@ class ConnectionThread(threading.Thread):
             else:
                 warning_posted = False
                 _LOGGER.debug(f"connected to {self.elmo.host}:{self.elmo.port}")
-                if not self.elmo.restart_connection:
-                    self.elmo.poll_thread.start()
+                # Always start the poll thread when a connection is established
+                self.elmo.poll_thread.start()
                 self.elmo.restart_connection = False
                 while (
                     not self._stop_event.is_set()
@@ -151,6 +152,11 @@ class ConnectionThread(threading.Thread):
                 ):
                     time.sleep(1)
                 if not self._stop_event.is_set():
+                    # If we're restarting, make sure to stop the poll thread first
+                    if self.elmo.restart_connection and hasattr(self.elmo, 'poll_thread') and self.elmo.poll_thread.is_alive():
+                        _LOGGER.debug("stopping poll thread before reconnection")
+                        self.elmo.poll_thread.join()
+
                     self.elmo.connected = False
                     self.elmo.socket.close()
                     _LOGGER.debug(
@@ -223,11 +229,22 @@ class ElmoClient:
             _LOGGER.error("start() called while already running")
         else:
             _LOGGER.debug("connection thread start requested")
-            # If we have an existing thread that's alive but we're in restart mode, stop it first
+
+            # Clean up any existing threads before starting new ones
             if self.connection_thread and self.connection_thread.is_alive():
                 _LOGGER.debug("stopping existing connection thread before restart")
                 self.connection_thread.join()
 
+            # Also make sure poll_thread is stopped if it exists and is running
+            if hasattr(self, 'poll_thread') and self.poll_thread and self.poll_thread.is_alive():
+                _LOGGER.debug("stopping existing poll thread before restart")
+                self.poll_thread.join()
+
+            # Clear the queue to prevent processing old commands
+            while not self.tx_queue.empty():
+                self.tx_queue.get()
+
+            # Create and start new threads
             self.connection_thread = ConnectionThread(self)
             self.poll_thread = PollThread(self)
             self.connection_thread.start()
