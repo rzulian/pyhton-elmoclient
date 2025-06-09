@@ -219,22 +219,37 @@ class ElmoClient:
 
     def start(self):
         """Start the Elmo client instance."""
-        if self.connection_thread and self.connection_thread.is_alive():
+        if self.connection_thread and self.connection_thread.is_alive() and not self.restart_connection:
             _LOGGER.error("start() called while already running")
         else:
             _LOGGER.debug("connection thread start requested")
+            # If we have an existing thread that's alive but we're in restart mode, stop it first
+            if self.connection_thread and self.connection_thread.is_alive():
+                _LOGGER.debug("stopping existing connection thread before restart")
+                self.connection_thread.join()
+
             self.connection_thread = ConnectionThread(self)
             self.poll_thread = PollThread(self)
             self.connection_thread.start()
             self.connected = True
+            self.restart_connection = False
 
     def stop(self):
         """Stop the Elmo client instance."""
-        if not self.connection_thread.is_alive():
-            _LOGGER.error("stop() poll thread called while already stopped")
+        if not self.connection_thread or not self.connection_thread.is_alive():
+            _LOGGER.debug("stop() called but connection thread is not running")
         else:
             _LOGGER.debug("connection thread stop requested")
             self.connection_thread.join()
+
+        # Also stop the poll thread if it exists and is running
+        if hasattr(self, 'poll_thread') and self.poll_thread and self.poll_thread.is_alive():
+            _LOGGER.debug("poll thread stop requested")
+            self.poll_thread.join()
+
+        # Reset connection state
+        self.connected = False
+        self.restart_connection = False
 
     def accesso_sistema(self):
         cmd = cmd_accesso_sistema(self._user, self._password)
