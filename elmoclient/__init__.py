@@ -73,6 +73,9 @@ class PollThread(threading.Thread):
                                 self.elmo.parse_settori_inseribili(data)
                             elif command == "accesso_sistema":
                                 self.elmo.parse_accesso_sistema(data)
+                        except TimeoutError:
+                            _LOGGER.debug(f"Socket timeout while receiving data for {command}")
+                            self._handle_socket_error()
                         except socket.error:
                             self._handle_socket_error()
 
@@ -88,6 +91,9 @@ class PollThread(threading.Thread):
                     try:
                         data = self.elmo.socket.recv(4096)
                         self.elmo.parse_update(data)
+                    except TimeoutError:
+                        _LOGGER.debug("Socket timeout while receiving status update")
+                        self._handle_socket_error()
                     except socket.error:
                         self._handle_socket_error()
                 except socket.error:
