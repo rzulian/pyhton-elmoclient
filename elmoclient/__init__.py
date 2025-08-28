@@ -131,7 +131,11 @@ class ConnectionThread(threading.Thread):
                 self.elmo.socket.settimeout(self.elmo.timeout)
                 self.elmo.socket.connect((self.elmo.host, self.elmo.port))
             except socket.error:
-                self.elmo.socket.close()
+                try:
+                    if self.elmo.socket:
+                        self.elmo.socket.close()
+                except Exception:
+                    pass
                 if warning_posted is False:
                     _LOGGER.debug(
                         f"attempting to connect to {self.elmo.host}:{self.elmo.port}, "
@@ -142,35 +146,55 @@ class ConnectionThread(threading.Thread):
                     time.sleep(1)
             else:
                 warning_posted = False
+                self.elmo.connected = True
                 _LOGGER.debug(f"connected to {self.elmo.host}:{self.elmo.port}")
-                # Always start the poll thread when a connection is established
-                self.elmo.poll_thread.start()
+
+                # Create and start a fresh poll thread if none is running
+                if self.elmo.poll_thread is None or not self.elmo.poll_thread.is_alive():
+                    self.elmo.poll_thread = PollThread(self.elmo)
+                    self.elmo.poll_thread.start()
+
                 self.elmo.restart_connection = False
+
+                # Remain connected until told to restart or stop
                 while (
                     not self._stop_event.is_set()
                     and self.elmo.restart_connection is False
                 ):
                     time.sleep(1)
+
+                # Cleanup before retrying connection or final stop
                 if not self._stop_event.is_set():
-                    # If we're restarting, make sure to stop the poll thread first
-                    if self.elmo.restart_connection and hasattr(self.elmo, 'poll_thread') and self.elmo.poll_thread.is_alive():
+                    # If we're restarting, stop the poll thread first
+                    if self.elmo.poll_thread and self.elmo.poll_thread.is_alive():
                         _LOGGER.debug("stopping poll thread before reconnection")
                         self.elmo.poll_thread.join()
+                        self.elmo.poll_thread = None
 
                     self.elmo.connected = False
-                    self.elmo.socket.close()
+                    try:
+                        if self.elmo.socket:
+                            self.elmo.socket.close()
+                    except Exception:
+                        pass
                     _LOGGER.debug(
                         f"lost connection to {self.elmo.host}:{self.elmo.port}"
                     )
                 else:
-                    # close all threads
-                    self.elmo.poll_thread.join()
+                    # final stop: close all threads
+                    if self.elmo.poll_thread and self.elmo.poll_thread.is_alive():
+                        self.elmo.poll_thread.join()
+                    self.elmo.poll_thread = None
                     self.elmo.connected = False
                     _LOGGER.debug(
                         f"closed connection to {self.elmo.host}:{self.elmo.port}"
                     )
 
-        self.elmo.socket.close()
+        try:
+            if self.elmo.socket:
+                self.elmo.socket.close()
+        except Exception:
+            pass
         self.elmo.connected = False
         _LOGGER.debug("connection thread stop")
 
