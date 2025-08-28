@@ -209,6 +209,7 @@ class ElmoClient:
         self.restart_lock = threading.Lock()
         self.restart_connection = False
         self.connection_thread = None
+        self.poll_thread = None  # ensure we start with no poll thread
 
         self.tx_queue = queue.Queue()
 
@@ -225,48 +226,74 @@ class ElmoClient:
 
     def start(self):
         """Start the Elmo client instance."""
-        if self.connection_thread and self.connection_thread.is_alive() and not self.restart_connection:
-            _LOGGER.error("start() called while already running")
-        else:
-            _LOGGER.debug("connection thread start requested")
+        if self.connection_thread and self.connection_thread.is_alive():
+            _LOGGER.debug("start() called but connection thread already running")
+            return
 
-            # Clean up any existing threads before starting new ones
-            if self.connection_thread and self.connection_thread.is_alive():
-                _LOGGER.debug("stopping existing connection thread before restart")
-                self.connection_thread.join()
+        _LOGGER.debug("connection thread start requested")
 
-            # Also make sure poll_thread is stopped if it exists and is running
-            if hasattr(self, 'poll_thread') and self.poll_thread and self.poll_thread.is_alive():
-                _LOGGER.debug("stopping existing poll thread before restart")
-                self.poll_thread.join()
+        # If a stray poll thread exists (shouldn't, but be defensive), stop it
+        if self.poll_thread and self.poll_thread.is_alive():
+            _LOGGER.debug("stopping stray poll thread before start")
+            self.poll_thread.join()
+            self.poll_thread = None
 
-            # Clear the queue to prevent processing old commands
-            while not self.tx_queue.empty():
-                self.tx_queue.get()
+        # Clear any pending TX commands from previous runs
+        try:
+            while True:
+                self.tx_queue.get_nowait()
+        except queue.Empty:
+            pass
 
-            # Create and start new threads
-            self.connection_thread = ConnectionThread(self)
-            self.poll_thread = PollThread(self)
-            self.connection_thread.start()
-            self.connected = True
-            self.restart_connection = False
+        # Reset state flags; connected will be set by ConnectionThread on success
+        self.connected = False
+        self.logged_in = False
+        self.restart_connection = False
+
+        # Start only the connection thread; it owns poll thread lifecycle
+        self.connection_thread = ConnectionThread(self)
+        self.connection_thread.start()
 
     def stop(self):
         """Stop the Elmo client instance."""
-        if not self.connection_thread or not self.connection_thread.is_alive():
-            _LOGGER.debug("stop() called but connection thread is not running")
-        else:
+        _LOGGER.debug("stop() requested")
+
+        # Stop connection thread (its join() sets the stop event)
+        if self.connection_thread and self.connection_thread.is_alive():
             _LOGGER.debug("connection thread stop requested")
-            self.connection_thread.join()
+            self.connection_thread.join(timeout=10)
 
-        # Also stop the poll thread if it exists and is running
-        if hasattr(self, 'poll_thread') and self.poll_thread and self.poll_thread.is_alive():
+        # Stop the poll thread if it's still around (fallback safety)
+        if self.poll_thread and self.poll_thread.is_alive():
             _LOGGER.debug("poll thread stop requested")
-            self.poll_thread.join()
+            self.poll_thread.join(timeout=10)
+            self.poll_thread = None
 
-        # Reset connection state
+        # Close socket safely
+        try:
+            if self.socket:
+                self.socket.close()
+        except Exception:
+            pass
+        finally:
+            self.socket = None
+
+        # Reset flags/state
+        self.polling_enabled = False
         self.connected = False
+        self.logged_in = False
         self.restart_connection = False
+
+        # Clear queue to avoid sending stale commands on next start
+        try:
+            while True:
+                self.tx_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        # Null out threads to make future starts clean
+        self.connection_thread = None
+        self.poll_thread = None
 
     def accesso_sistema(self):
         cmd = cmd_accesso_sistema(self._user, self._password)
